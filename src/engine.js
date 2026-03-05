@@ -479,33 +479,113 @@ export function createEngine({ provider = 'stockfish', maiaDifficulty = 1500 } =
   const workerUrl = `${import.meta.env.BASE_URL}stockfish/stockfish.wasm.js`;
 
   if (provider === 'maia') {
-    const analysisClient = createUciWorkerClient({ workerUrl });
-    const fallbackPlayClient = createUciWorkerClient({ workerUrl });
     const maiaClient = createMaiaOpponentClient({ difficultyElo: maiaDifficulty });
+    let analysisClient = null;
+    let fallbackPlayClient = null;
+    let analysisInitPromise = null;
+    let fallbackPlayInitPromise = null;
+    let configuredSkillLevel = 20;
+
+    function getAnalysisClient() {
+      if (!analysisClient) {
+        analysisClient = createUciWorkerClient({ workerUrl });
+      }
+      return analysisClient;
+    }
+
+    function getFallbackPlayClient() {
+      if (!fallbackPlayClient) {
+        fallbackPlayClient = createUciWorkerClient({ workerUrl });
+      }
+      return fallbackPlayClient;
+    }
+
+    async function ensureAnalysisClientReady() {
+      const client = getAnalysisClient();
+      if (!analysisInitPromise) {
+        analysisInitPromise = (async () => {
+          await client.init();
+          await client.setSkillLevel(configuredSkillLevel);
+          return client;
+        })().catch((error) => {
+          analysisInitPromise = null;
+          throw error;
+        });
+      }
+      return analysisInitPromise;
+    }
+
+    async function ensureFallbackPlayClientReady() {
+      const client = getFallbackPlayClient();
+      if (!fallbackPlayInitPromise) {
+        fallbackPlayInitPromise = (async () => {
+          await client.init();
+          await client.setSkillLevel(configuredSkillLevel);
+          return client;
+        })().catch((error) => {
+          fallbackPlayInitPromise = null;
+          throw error;
+        });
+      }
+      return fallbackPlayInitPromise;
+    }
 
     async function init() {
-      await Promise.all([maiaClient.init(), analysisClient.init(), fallbackPlayClient.init()]);
+      await maiaClient.init();
     }
 
     async function setSkillLevel(level = 20) {
-      await Promise.all([analysisClient.setSkillLevel(level), fallbackPlayClient.setSkillLevel(level)]);
+      configuredSkillLevel = clampSkillLevel(level);
+      const tasks = [];
+
+      if (analysisInitPromise) {
+        tasks.push(ensureAnalysisClientReady().then((client) => client.setSkillLevel(configuredSkillLevel)));
+      }
+
+      if (fallbackPlayInitPromise) {
+        tasks.push(
+          ensureFallbackPlayClientReady().then((client) => client.setSkillLevel(configuredSkillLevel))
+        );
+      }
+
+      await Promise.all(tasks);
     }
 
     async function newGame() {
-      analysisClient.flush('new_game');
-      void analysisClient.newGame().catch(() => {});
-      fallbackPlayClient.flush('new_game', { cancelActive: true });
-      void fallbackPlayClient.newGame().catch(() => {});
+      if (analysisInitPromise) {
+        analysisClient.flush('new_game');
+        void ensureAnalysisClientReady()
+          .then((client) => client.newGame())
+          .catch(() => {});
+      }
+
+      if (fallbackPlayInitPromise) {
+        fallbackPlayClient.flush('new_game', { cancelActive: true });
+        void ensureFallbackPlayClientReady()
+          .then((client) => client.newGame())
+          .catch(() => {});
+      }
+
       await maiaClient.newGame();
     }
 
     function flushAnalysis(reason = 'flushed') {
-      analysisClient.flush(reason);
+      if (analysisClient) {
+        analysisClient.flush(reason);
+      }
     }
 
     function terminate() {
-      analysisClient.terminate();
-      fallbackPlayClient.terminate();
+      if (analysisClient) {
+        analysisClient.terminate();
+        analysisClient = null;
+      }
+      if (fallbackPlayClient) {
+        fallbackPlayClient.terminate();
+        fallbackPlayClient = null;
+      }
+      analysisInitPromise = null;
+      fallbackPlayInitPromise = null;
       maiaClient.terminate();
     }
 
@@ -516,7 +596,8 @@ export function createEngine({ provider = 'stockfish', maiaDifficulty = 1500 } =
         if (!(error instanceof MaiaRequestExhaustedError)) {
           throw error;
         }
-        return fallbackPlayClient.getBestMove(fen, search);
+        const fallbackClient = await ensureFallbackPlayClientReady();
+        return fallbackClient.getBestMove(fen, search);
       }
     }
 
@@ -528,7 +609,10 @@ export function createEngine({ provider = 'stockfish', maiaDifficulty = 1500 } =
       getBestMove,
       getRankedMoves: (fen, options) => maiaClient.getRankedMoves(fen, options),
       getRankedMovesWithScores: (fen, options) => maiaClient.getRankedMovesWithScores(fen, options),
-      analyzePosition: (fen, movetimeMs) => analysisClient.analyzePosition(fen, movetimeMs),
+      analyzePosition: async (fen, movetimeMs) => {
+        const client = await ensureAnalysisClientReady();
+        return client.analyzePosition(fen, movetimeMs);
+      },
       flushAnalysis,
       terminate
     };

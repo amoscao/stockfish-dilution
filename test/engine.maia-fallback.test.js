@@ -59,6 +59,15 @@ vi.mock('../src/maia-opponent.js', () => {
 });
 
 describe('engine maia fallback', () => {
+  async function waitForMessages(worker, minimumCount) {
+    for (let i = 0; i < 50; i += 1) {
+      if (worker.messages.length >= minimumCount) {
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+  }
+
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
@@ -78,12 +87,38 @@ describe('engine maia fallback', () => {
     );
 
     const engine = createEngine({ provider: 'maia', maiaDifficulty: 1500 });
-    expect(MockWorker.instances.length).toBe(2);
-    const fallbackPlayWorker = MockWorker.instances[1];
+    await engine.init();
+    expect(MockWorker.instances.length).toBe(0);
 
     const bestMovePromise = engine.getBestMove('fallback-fen', 250);
     await Promise.resolve();
-    expect(fallbackPlayWorker.messages).toEqual(['position fen fallback-fen', 'go movetime 250']);
+    expect(MockWorker.instances.length).toBe(1);
+    const fallbackPlayWorker = MockWorker.instances[0];
+    expect(fallbackPlayWorker.messages).toEqual(['uci']);
+
+    fallbackPlayWorker.emit('uciok');
+    await Promise.resolve();
+    expect(fallbackPlayWorker.messages).toEqual(['uci', 'isready']);
+
+    fallbackPlayWorker.emit('readyok');
+    await waitForMessages(fallbackPlayWorker, 4);
+    expect(fallbackPlayWorker.messages).toEqual([
+      'uci',
+      'isready',
+      'setoption name Skill Level value 20',
+      'isready'
+    ]);
+
+    fallbackPlayWorker.emit('readyok');
+    await waitForMessages(fallbackPlayWorker, 6);
+    expect(fallbackPlayWorker.messages).toEqual([
+      'uci',
+      'isready',
+      'setoption name Skill Level value 20',
+      'isready',
+      'position fen fallback-fen',
+      'go movetime 250'
+    ]);
 
     fallbackPlayWorker.emit('bestmove e2e4 ponder e7e5');
     await expect(bestMovePromise).resolves.toEqual({ from: 'e2', to: 'e4', promotion: undefined });
@@ -95,5 +130,6 @@ describe('engine maia fallback', () => {
 
     const engine = createEngine({ provider: 'maia', maiaDifficulty: 1500 });
     await expect(engine.getBestMove('bad-fen', 250)).rejects.toThrow('bad payload');
+    expect(MockWorker.instances.length).toBe(0);
   });
 });

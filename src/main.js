@@ -48,6 +48,7 @@ const POST_COMPUTER_EVAL_MS = 350;
 const MAIA_HUMAN_DELAY_THRESHOLD_MS = 1000;
 const MAIA_HUMAN_DELAY_MIN_MS = 500;
 const MAIA_HUMAN_DELAY_MAX_MS = 2000;
+const GAME_RESULT_MODAL_DELAY_MS = import.meta.env.MODE === 'test' ? 0 : 750;
 
 const statusTextEl = document.querySelector('#status-text');
 const boardEl = document.querySelector('#board');
@@ -161,6 +162,7 @@ let gameConcluded = false;
 let forcedGameStatus = null;
 let evalHistoryHuman = [];
 let gameGeneration = 0;
+let pendingGameResultModalTimeoutId = null;
 const blunderDecisionSmoother = createBlunderDecisionSmoother();
 
 const PIECE_ORDER = ['p', 'b', 'n', 'r', 'q'];
@@ -419,7 +421,33 @@ function openGameResultModal(status) {
   postGameModalOpen = true;
 }
 
+function clearPendingGameResultModal() {
+  if (pendingGameResultModalTimeoutId !== null) {
+    clearTimeout(pendingGameResultModalTimeoutId);
+    pendingGameResultModalTimeoutId = null;
+  }
+}
+
+function scheduleGameResultModal() {
+  clearPendingGameResultModal();
+  const scheduledGeneration = gameGeneration;
+  pendingGameResultModalTimeoutId = setTimeout(() => {
+    pendingGameResultModalTimeoutId = null;
+    if (scheduledGeneration !== gameGeneration) {
+      return;
+    }
+
+    const status = getEffectiveGameStatus();
+    if (!status.over || !gameConcluded) {
+      return;
+    }
+
+    openGameResultModal(status);
+  }, GAME_RESULT_MODAL_DELAY_MS);
+}
+
 function closeGameResultModal() {
+  clearPendingGameResultModal();
   if (!gameResultDialogEl) {
     return;
   }
@@ -1075,7 +1103,7 @@ function handleGameConclusionTransition() {
 
   gameConcluded = true;
   updatePrimaryTopRightButton();
-  openGameResultModal(status);
+  scheduleGameResultModal();
 }
 
 function forfeitCurrentGame() {
@@ -1102,6 +1130,7 @@ function forfeitCurrentGame() {
 
 function returnToMainMenu() {
   bumpGeneration('main_menu');
+  clearPendingGameResultModal();
   closeGameResultModal();
   forcedGameStatus = null;
   gameConcluded = false;
@@ -1462,6 +1491,7 @@ async function startNewGame() {
   }
 
   bumpGeneration('start_new_game');
+  clearPendingGameResultModal();
   searchToken += 1;
   thinking = false;
   pendingPromotion = null;
@@ -1582,15 +1612,14 @@ neverBlindLastMovedCheckbox.addEventListener('change', (event) => {
 async function boot() {
   const engineProvider =
     activeMode === GAME_MODE.RAMPFISH ? ENGINE_PROVIDER.MAIA : ENGINE_PROVIDER.STOCKFISH;
-  const opponentName = engineProvider === ENGINE_PROVIDER.MAIA ? 'Maia' : 'Stockfish';
   statusTextEl.textContent =
     activeMode === GAME_MODE.BLINDFISH
-      ? `Initializing Blindfish (${opponentName})...`
+      ? 'Initializing Blindfish...'
       : activeMode === GAME_MODE.CLAPBACKFISH
-        ? `Initializing Clapbackfish (${opponentName})...`
+        ? 'Initializing Clapbackfish...'
       : activeMode === GAME_MODE.RAMPFISH
-        ? `Initializing Rampfish (${opponentName})...`
-        : `Initializing Blunderfish (${opponentName})...`;
+        ? 'Initializing Rampfish (Maia)...'
+        : 'Initializing Blunderfish...';
 
   applyModeSettingsUi();
   revealEngineHints = Boolean(revealBlundersCheckbox.checked);
