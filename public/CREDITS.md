@@ -17,3 +17,11 @@ Source package: https://www.npmjs.com/package/stockfish.js (v10.0.2)
 - Engine: Stockfish (compiled to JavaScript/WebAssembly)
 - Upstream license: GPL-3.0
 - License text: see `public/stockfish/COPYING.txt`
+
+## Maia engines
+
+- Maia project:
+  - https://www.maiachess.com/
+- Maia backend/frontend sources:
+  - https://github.com/CSSLab/maia2
+  - https://github.com/CSSLab/maia-platform-frontend/

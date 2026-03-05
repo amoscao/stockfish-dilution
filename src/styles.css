@@ -143,6 +143,16 @@ body {
   margin-bottom: 0.8rem;
 }
 
+.setup-number {
+  width: 100%;
+  padding: 0.45rem 0.5rem;
+  border: 1px solid #7d5e41;
+  border-radius: 8px;
+  background: #2a1f18;
+  color: var(--text);
+  margin-bottom: 0.8rem;
+}
+
 .setup-actions {
   display: flex;
   justify-content: flex-end;
@@ -555,18 +565,28 @@ button:hover {
   font-size: 0.95rem;
 }
 
-.ramp-readonly[hidden] {
+.clapback-readonly[hidden] {
   display: none;
 }
 
-.ramp-readonly {
+.clapback-readonly {
   margin-top: 0.65rem;
   border-top: 1px solid rgba(239, 228, 214, 0.12);
   padding-top: 0.55rem;
 }
 
-.ramp-readonly-row {
+.clapback-readonly-row {
   margin: 0.3rem 0;
+  font-size: 0.9rem;
+  color: #dbc7af;
+}
+
+.maia-elo-row[hidden] {
+  display: none;
+}
+
+.maia-elo-row {
+  margin: 0.6rem 0 0.1rem;
   font-size: 0.9rem;
   color: #dbc7af;
 }

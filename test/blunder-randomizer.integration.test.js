@@ -12,6 +12,7 @@ const smootherMock = vi.hoisted(() => ({
 const engineMock = vi.hoisted(() => ({
   init: vi.fn().mockResolvedValue(undefined),
   setSkillLevel: vi.fn().mockResolvedValue(undefined),
+  setMaiaDifficulty: vi.fn().mockResolvedValue(undefined),
   newGame: vi.fn().mockResolvedValue(undefined),
   getBestMove: vi.fn().mockResolvedValue({ from: 'a7', to: 'a6' }),
   analyzePosition: vi.fn().mockResolvedValue({ type: 'cp', value: 0 }),
@@ -257,5 +258,21 @@ describe('blunder randomizer integration', () => {
     await flushUi();
 
     expect(document.querySelector('#eval-bar-label').textContent).toBe('+1.20');
+  });
+
+  test('blunderfish always uses stockfish and hides current Maia ELO', async () => {
+    await import('../src/main.js');
+
+    document.querySelector('#mode-blunderfish-btn').click();
+    document.querySelector('#setup-start-btn').click();
+    await flushUi();
+    await flushUi();
+
+    const engineModule = await import('../src/engine.js');
+    expect(engineModule.createEngine).toHaveBeenCalledWith({
+      provider: 'stockfish',
+      maiaDifficulty: 1100
+    });
+    expect(document.querySelector('#current-maia-elo-row').hidden).toBe(true);
   });
 });

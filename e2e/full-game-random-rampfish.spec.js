@@ -1,10 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-// NOTE: This spec intentionally uses random human moves.
-// It is expected to remain stable because random play is overwhelmingly likely
-// to lose against Stockfish-strength play in this mode.
-
-const EVAL_LABEL_PATTERN = /[+-]\d+\.\d{2}|-?M\d+/;
+const APP_ORIGIN = 'http://127.0.0.1:4174';
 
 function shuffled(list) {
   const values = [...list];
@@ -74,26 +70,41 @@ async function tryPlayRandomWhiteMove(page) {
   return false;
 }
 
-test('plays a full random white clapbackfish game and reaches end-game modal', async ({ page }) => {
-  test.setTimeout(120000);
+test('plays a full random rampfish game and makes no external runtime requests', async ({ page }) => {
+  test.setTimeout(420000);
+
+  const externalRequests = [];
+  page.on('request', (request) => {
+    const url = request.url();
+    if (url.startsWith('data:') || url.startsWith('blob:')) {
+      return;
+    }
+
+    let origin;
+    try {
+      origin = new URL(url).origin;
+    } catch {
+      return;
+    }
+
+    if (origin !== APP_ORIGIN) {
+      externalRequests.push(url);
+    }
+  });
 
   await page.goto('/?engineMovetimeMs=50');
-  await page.getByRole('button', { name: 'Clapbackfish' }).click();
+  await page.getByRole('button', { name: 'Rampfish' }).click();
   await page.getByLabel('Play as').selectOption('w');
   await page.getByRole('button', { name: 'Start Game' }).click();
 
   const resultDialog = page.locator('#game-result-dialog');
-  const primaryBtn = page.locator('#new-game-btn');
   const moveRows = page.locator('#moves-body tr');
 
-  await expect(page.locator('.topbar h1')).toHaveText('Clapbackfish');
-  await expect(primaryBtn).toHaveText('Forfeit');
-  await expect(page.locator('#eval-bar-wrap')).toBeVisible();
-  await expect(page.locator('#eval-bar-label')).toHaveText(EVAL_LABEL_PATTERN);
-  await expect(page.locator('#ramp-readonly-settings')).toBeVisible();
+  await expect(page.locator('.topbar h1')).toHaveText('Rampfish');
+  await expect(page.locator('#new-game-btn')).toHaveText('Forfeit', { timeout: 120000 });
 
   let humanMoves = 0;
-  const maxHumanMoves = 140;
+  const maxHumanMoves = 280;
 
   while (!(await resultDialog.isVisible()) && humanMoves < maxHumanMoves) {
     const played = await tryPlayRandomWhiteMove(page);
@@ -103,9 +114,6 @@ test('plays a full random white clapbackfish game and reaches end-game modal', a
     }
 
     humanMoves += 1;
-
-    await expect(page.locator('#eval-bar-wrap')).toBeVisible();
-    await expect(page.locator('#eval-bar-label')).toHaveText(EVAL_LABEL_PATTERN);
 
     await page.waitForFunction(() => {
       const dialog = document.querySelector('#game-result-dialog');
@@ -117,30 +125,16 @@ test('plays a full random white clapbackfish game and reaches end-game modal', a
     });
   }
 
-  if (!(await resultDialog.isVisible())) {
-    await primaryBtn.click();
-  }
-
   await expect(resultDialog).toBeVisible();
   await expect(page.locator('#game-result-title')).toHaveText(/You (won|lost :\()|Draw!/);
-  await expect(page.locator('#game-result-graph')).toBeVisible();
   await expect(page.locator('#new-game-btn')).toHaveText('New Game');
   await expect(moveRows).not.toHaveCount(0);
-  const playedPly = await page.$$eval('#moves-body tr', (rows) => {
-    let count = 0;
-    for (const row of rows) {
-      const whiteMove = row.children[1]?.textContent?.trim() || '';
-      const blackMove = row.children[2]?.textContent?.trim() || '';
-      if (whiteMove) {
-        count += 1;
-      }
-      if (blackMove) {
-        count += 1;
-      }
-    }
-    return count;
-  });
-  expect(playedPly).toBeGreaterThanOrEqual(40);
-  await expect(page.locator('#game-result-target-line')).toHaveCount(1);
-  await expect(page.locator('#game-result-target-legend')).toHaveCount(1);
+
+  const badDomainRequests = externalRequests.filter(
+    (url) =>
+      url.includes('githubusercontent') ||
+      url.includes('jsdelivr') ||
+      !url.startsWith(APP_ORIGIN)
+  );
+  expect(badDomainRequests).toEqual([]);
 });

@@ -179,6 +179,41 @@ describe('engine worker integration', () => {
     await expect(movesPromise).resolves.toEqual([{ from: 'e2', to: 'e4', promotion: undefined }]);
   });
 
+  test('getRankedMovesWithScores supports restricting root moves via searchmoves', async () => {
+    const { engine, playWorker } = createWithWorkers();
+    const entriesPromise = engine.getRankedMovesWithScores('subset-fen', {
+      movetimeMs: 180,
+      multiPv: 2,
+      depth: 8,
+      searchMoves: [
+        { from: 'a7', to: 'a6' },
+        { from: 'a7', to: 'a5' }
+      ]
+    });
+
+    expect(playWorker.messages).toEqual([
+      'setoption name MultiPV value 2',
+      'position fen subset-fen',
+      'go depth 8 movetime 180 searchmoves a7a6 a7a5'
+    ]);
+
+    playWorker.emit('info depth 8 multipv 1 score cp 33 pv a7a6');
+    playWorker.emit('info depth 8 multipv 2 score cp 20 pv a7a5');
+    playWorker.emit('bestmove a7a6 ponder a2a3');
+    await expect(entriesPromise).resolves.toEqual([
+      {
+        rank: 1,
+        move: { from: 'a7', to: 'a6', promotion: undefined },
+        score: { type: 'cp', value: 33 }
+      },
+      {
+        rank: 2,
+        move: { from: 'a7', to: 'a5', promotion: undefined },
+        score: { type: 'cp', value: 20 }
+      }
+    ]);
+  });
+
   test('getRankedMovesWithScores clamps invalid multipv and ignores invalid depth', async () => {
     const { engine, playWorker } = createWithWorkers();
 
