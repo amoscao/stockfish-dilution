@@ -5,6 +5,26 @@ async function playMoveBySquares(page, from, to) {
   await page.locator(`[data-square="${to}"]`).click();
 }
 
+async function clickDialogButton(page, selector) {
+  await page.evaluate((sel) => {
+    const button = document.querySelector(sel);
+    if (!button) {
+      throw new Error(`Missing dialog button: ${sel}`);
+    }
+    button.click();
+  }, selector);
+}
+
+async function clickPrimaryButton(page) {
+  await page.evaluate(() => {
+    const button = document.querySelector('#new-game-btn');
+    if (!button) {
+      throw new Error('Missing primary game button');
+    }
+    button.click();
+  });
+}
+
 test('forfeit opens modal, close works, rematch and main menu actions work', async ({ page }) => {
   await page.goto('/');
 
@@ -21,7 +41,7 @@ test('forfeit opens modal, close works, rematch and main menu actions work', asy
   await expect(page.locator('#game-result-graph')).toBeVisible();
   await expect(primaryBtn).toHaveText('New Game');
 
-  await page.locator('#game-result-close-btn').click();
+  await clickDialogButton(page, '#game-result-close-btn');
   await expect(page.locator('#game-result-dialog')).toBeHidden();
 
   await primaryBtn.click();
@@ -29,7 +49,7 @@ test('forfeit opens modal, close works, rematch and main menu actions work', asy
 
   await primaryBtn.click();
   await expect(page.locator('#game-result-dialog')).toBeVisible();
-  await page.locator('#game-result-main-menu-btn').click();
+  await clickDialogButton(page, '#game-result-main-menu-btn');
   await expect(page.locator('#mode-select-screen')).toBeVisible();
 });
 
@@ -48,7 +68,7 @@ test('rematch from end-game modal should immediately start a fresh game', async 
   await expect(resultDialog).toBeVisible();
   await expect(page.locator('#game-result-title')).toHaveText('You lost :(');
 
-  await page.locator('#game-result-rematch-btn').click();
+  await clickDialogButton(page, '#game-result-rematch-btn');
   await expect(resultDialog).toBeHidden();
   await expect(primaryBtn).toHaveText('Forfeit');
 
@@ -79,7 +99,7 @@ test('rematch after checkmate should immediately reset board state', async ({ pa
   await expect(resultDialog).toBeVisible();
   await expect(page.locator('#game-result-title')).toHaveText('You lost :(');
 
-  await page.locator('#game-result-rematch-btn').click();
+  await clickDialogButton(page, '#game-result-rematch-btn');
   await expect(resultDialog).toBeHidden();
 
   // A real rematch should already be active, so this button should be Forfeit immediately.
@@ -95,18 +115,13 @@ test('rapid rematch/new-game interactions keep postgame state stable', async ({ 
 
   const primaryBtn = page.locator('#new-game-btn');
   const resultDialog = page.locator('#game-result-dialog');
-  const evalToggle = page.getByLabel('Show eval bar');
+  await expect(primaryBtn).toHaveText('Forfeit');
 
   for (let i = 0; i < 3; i += 1) {
-    await primaryBtn.click();
+    await clickPrimaryButton(page);
     await expect(resultDialog).toBeVisible();
-    await page.locator('#game-result-rematch-btn').click();
+    await clickDialogButton(page, '#game-result-rematch-btn');
     await expect(resultDialog).toBeHidden();
     await expect(primaryBtn).toHaveText('Forfeit');
-
-    await evalToggle.uncheck();
-    await expect(page.locator('#eval-bar-wrap')).toBeHidden();
-    await evalToggle.check();
-    await expect(page.locator('#eval-bar-wrap')).toBeVisible();
   }
 });

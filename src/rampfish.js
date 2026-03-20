@@ -1,68 +1,71 @@
-export const RAMP_DEFAULT_FINAL_MOVE = 40;
-export const RAMP_MIN_FINAL_MOVE = 1;
-export const RAMP_TARGET_CP_MIN = -2000;
-export const RAMP_TARGET_CP_MAX = 2000;
+export const MAIA_ELO_LEVELS = Object.freeze([1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800, 1900]);
 
-export const RAMP_PROFILES = {
-  MIN: {
-    skillLevel: 0,
-    depth: 1,
-    movetimeMs: 50
-  },
-  MAX: {
-    skillLevel: 20,
-    depth: 40,
-    movetimeMs: 1500
-  }
-};
+export const RAMPFISH_DEFAULT_START_ELO = 1100;
+export const RAMPFISH_DEFAULT_END_ELO = 1900;
+export const RAMPFISH_DEFAULT_TURN_N = 20;
+export const RAMPFISH_MIN_TURN_N = 1;
+export const RAMPFISH_MAX_TURN_N = 200;
 
-export function clampFinalMove(value) {
+export function clampTurnN(value) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) {
-    return RAMP_DEFAULT_FINAL_MOVE;
+    return RAMPFISH_DEFAULT_TURN_N;
   }
-  return Math.max(RAMP_MIN_FINAL_MOVE, Math.round(parsed));
+
+  return Math.max(RAMPFISH_MIN_TURN_N, Math.min(RAMPFISH_MAX_TURN_N, Math.round(parsed)));
 }
 
-export function computeRampProgress(engineTurnIndex, finalMove) {
-  const clampedFinalMove = clampFinalMove(finalMove);
+export function computeRampProgress(engineTurnIndex, turnN) {
+  const clampedTurnN = clampTurnN(turnN);
   const turn = Number(engineTurnIndex);
 
-  if (!Number.isFinite(turn) || turn <= 1 || clampedFinalMove <= 1) {
-    return turn >= clampedFinalMove ? 1 : 0;
+  if (!Number.isFinite(turn) || turn <= 0) {
+    return 0;
   }
 
-  if (turn >= clampedFinalMove) {
+  if (clampedTurnN === 1) {
+    return turn >= 1 ? 1 : 0;
+  }
+
+  if (turn <= 1) {
+    return 0;
+  }
+
+  if (turn >= clampedTurnN) {
     return 1;
   }
 
-  return (turn - 1) / (clampedFinalMove - 1);
+  return (turn - 1) / (clampedTurnN - 1);
 }
 
-function lerpRounded(start, end, progress) {
-  return Math.round(start + (end - start) * progress);
+export function interpolateElo(startElo, endElo, progress) {
+  const from = Number(startElo);
+  const to = Number(endElo);
+  const p = Number(progress);
+
+  const safeFrom = Number.isFinite(from) ? from : RAMPFISH_DEFAULT_START_ELO;
+  const safeTo = Number.isFinite(to) ? to : RAMPFISH_DEFAULT_END_ELO;
+  const safeProgress = Number.isFinite(p) ? Math.max(0, Math.min(1, p)) : 0;
+
+  return Math.round(safeFrom + (safeTo - safeFrom) * safeProgress);
 }
 
-export function interpolateRampProfile({ engineTurnIndex, finalMove }) {
-  const progress = computeRampProgress(engineTurnIndex, finalMove);
-
-  return {
-    skillLevel: lerpRounded(RAMP_PROFILES.MIN.skillLevel, RAMP_PROFILES.MAX.skillLevel, progress),
-    depth: lerpRounded(RAMP_PROFILES.MIN.depth, RAMP_PROFILES.MAX.depth, progress),
-    movetimeMs: lerpRounded(RAMP_PROFILES.MIN.movetimeMs, RAMP_PROFILES.MAX.movetimeMs, progress),
-    progress
-  };
-}
-
-export function computeTargetEvalCp({ engineTurnIndex, finalMove }) {
-  const progress = computeRampProgress(engineTurnIndex, finalMove);
-  return lerpRounded(RAMP_TARGET_CP_MIN, RAMP_TARGET_CP_MAX, progress);
-}
-
-export function isPostRampPhase(engineTurnIndex, finalMove) {
-  const turn = Number(engineTurnIndex);
-  if (!Number.isFinite(turn)) {
-    return false;
+export function nearestSupportedMaiaElo(elo) {
+  const parsed = Number(elo);
+  if (!Number.isFinite(parsed)) {
+    return RAMPFISH_DEFAULT_START_ELO;
   }
-  return turn > clampFinalMove(finalMove);
+
+  let nearest = MAIA_ELO_LEVELS[0];
+  let bestDistance = Math.abs(parsed - nearest);
+  for (let i = 1; i < MAIA_ELO_LEVELS.length; i += 1) {
+    const candidate = MAIA_ELO_LEVELS[i];
+    const distance = Math.abs(parsed - candidate);
+    if (distance < bestDistance) {
+      nearest = candidate;
+      bestDistance = distance;
+    }
+  }
+
+  return nearest;
 }

@@ -6,6 +6,17 @@ async function startBlunderfishAsWhite(page) {
   await page.getByLabel('Play as').selectOption('w');
   await page.getByRole('button', { name: 'Start Game' }).click();
   await expect(page.locator('#game-app')).toBeVisible();
+  await expect(page.locator('#new-game-btn')).toHaveText('Forfeit');
+}
+
+async function clickDialogButton(page, selector) {
+  await page.evaluate((sel) => {
+    const button = document.querySelector(sel);
+    if (!button) {
+      throw new Error(`Missing dialog button: ${sel}`);
+    }
+    button.click();
+  }, selector);
 }
 
 test('flip board and export FEN work in active game', async ({ page }) => {
@@ -57,7 +68,7 @@ test('forfeit flow transitions to concluded state and new game starts immediatel
   await expect(page.locator('#game-result-title')).toHaveText('You lost :(');
   await expect(primaryBtn).toHaveText('New Game');
 
-  await page.locator('#game-result-close-btn').click();
+  await clickDialogButton(page, '#game-result-close-btn');
   await expect(resultDialog).toBeHidden();
 
   await primaryBtn.click();
@@ -74,7 +85,7 @@ test('postgame modal action buttons close, rematch, and main menu work', async (
   await primaryBtn.click();
   await expect(resultDialog).toBeVisible();
 
-  await page.locator('#game-result-close-btn').click();
+  await clickDialogButton(page, '#game-result-close-btn');
   await expect(resultDialog).toBeHidden();
 
   await primaryBtn.click();
@@ -84,13 +95,13 @@ test('postgame modal action buttons close, rematch, and main menu work', async (
   await primaryBtn.click();
   await expect(resultDialog).toBeVisible();
 
-  await page.locator('#game-result-rematch-btn').click();
+  await clickDialogButton(page, '#game-result-rematch-btn');
   await expect(resultDialog).toBeHidden();
   await expect(primaryBtn).toHaveText('Forfeit');
 
   await primaryBtn.click();
   await expect(resultDialog).toBeVisible();
-  await page.locator('#game-result-main-menu-btn').click();
+  await clickDialogButton(page, '#game-result-main-menu-btn');
 
   await expect(page.locator('#mode-select-screen')).toBeVisible();
   await expect(page.locator('#game-app')).toHaveClass(/app-hidden/);

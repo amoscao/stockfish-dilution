@@ -11,17 +11,30 @@ import {
   sanitizeCpForGraph
 } from './eval-graph.js';
 import {
-  RAMP_DEFAULT_FINAL_MOVE,
-  RAMP_TARGET_CP_MAX,
-  RAMP_TARGET_CP_MIN,
-  computeTargetEvalCp,
-  isPostRampPhase
+  CLAPBACK_DEFAULT_FINAL_MOVE,
+  computeClapbackTargetEvalCp,
+  isPostClapbackPhase
+} from './clapbackfish.js';
+import {
+  RAMPFISH_DEFAULT_END_ELO,
+  RAMPFISH_DEFAULT_START_ELO,
+  RAMPFISH_DEFAULT_TURN_N,
+  clampTurnN,
+  computeRampProgress,
+  interpolateElo,
+  nearestSupportedMaiaElo
 } from './rampfish.js';
 
 const GAME_MODE = {
   BLUNDERFISH: 'blunderfish',
   BLINDFISH: 'blindfish',
+  CLAPBACKFISH: 'clapbackfish',
   RAMPFISH: 'rampfish'
+};
+
+const ENGINE_PROVIDER = {
+  STOCKFISH: 'stockfish',
+  MAIA: 'maia'
 };
 
 const BLUNDER_CHANCE_DEFAULT = 20;
@@ -29,9 +42,13 @@ const PIECE_BLINDNESS_DEFAULT = 10;
 const BLINDNESS_MAX = 20;
 const BLUNDER_MAX = 100;
 const MAX_BLIND_RETRIES = 3;
-const RAMP_MAX_SKILL_LEVEL = 20;
+const CLAPBACK_MAX_SKILL_LEVEL = 20;
 const ENGINE_MOVETIME_DEFAULT_MS = 1500;
 const POST_COMPUTER_EVAL_MS = 350;
+const MAIA_HUMAN_DELAY_THRESHOLD_MS = 1000;
+const MAIA_HUMAN_DELAY_MIN_MS = 500;
+const MAIA_HUMAN_DELAY_MAX_MS = 2000;
+const GAME_RESULT_MODAL_DELAY_MS = import.meta.env.MODE === 'test' ? 0 : 750;
 
 const statusTextEl = document.querySelector('#status-text');
 const boardEl = document.querySelector('#board');
@@ -49,6 +66,8 @@ const blunderSlider = document.querySelector('#blunder-slider');
 const blunderInput = document.querySelector('#blunder-input');
 const revealBlundersCheckbox = document.querySelector('#reveal-blunders');
 const showEvalBarCheckbox = document.querySelector('#show-eval-bar');
+const currentMaiaEloRowEl = document.querySelector('#current-maia-elo-row');
+const currentMaiaEloValueEl = document.querySelector('#current-maia-elo-value');
 const blindToYourPiecesCheckbox = document.querySelector('#blind-to-your-pieces');
 const blindToOwnPiecesCheckbox = document.querySelector('#blind-to-own-pieces');
 const neverBlindLastMovedCheckbox = document.querySelector('#never-blind-last-moved');
@@ -63,6 +82,7 @@ const modeSelectScreenEl = document.querySelector('#mode-select-screen');
 const setupScreenEl = document.querySelector('#setup-screen');
 const modeBlunderfishBtn = document.querySelector('#mode-blunderfish-btn');
 const modeBlindfishBtn = document.querySelector('#mode-blindfish-btn');
+const modeClapbackfishBtn = document.querySelector('#mode-clapbackfish-btn');
 const modeRampfishBtn = document.querySelector('#mode-rampfish-btn');
 const modeSelectNoteEl = document.querySelector('#mode-select-note');
 const setupTitleEl = document.querySelector('#setup-title');
@@ -70,6 +90,10 @@ const setupSubtitleEl = document.querySelector('#setup-subtitle');
 const setupFirstGameHintEl = document.querySelector('#setup-first-game-hint');
 const setupBlunderSettingsEl = document.querySelector('#setup-blunder-settings');
 const setupBlindSettingsEl = document.querySelector('#setup-blind-settings');
+const setupRampfishSettingsEl = document.querySelector('#setup-rampfish-settings');
+const setupRampfishStartEloEl = document.querySelector('#setup-rampfish-start-elo');
+const setupRampfishEndEloEl = document.querySelector('#setup-rampfish-end-elo');
+const setupRampfishTurnNEl = document.querySelector('#setup-rampfish-turn-n');
 const setupBlunderSliderEl = document.querySelector('#setup-blunder-slider');
 const setupBlunderValueEl = document.querySelector('#setup-blunder-value');
 const setupBlindSliderEl = document.querySelector('#setup-blind-slider');
@@ -86,8 +110,8 @@ const topbarTitleEl = document.querySelector('.topbar h1');
 const subtitleEl = document.querySelector('.subtitle');
 const settingRowEl = blunderSlider.parentElement;
 const revealSettingCheckboxEl = revealBlundersCheckbox.parentElement;
-const rampReadonlySettingsEl = document.querySelector('#ramp-readonly-settings');
-const rampTargetCpValueEl = document.querySelector('#ramp-target-cp-value');
+const clapbackReadonlySettingsEl = document.querySelector('#clapback-readonly-settings');
+const clapbackTargetCpValueEl = document.querySelector('#clapback-target-cp-value');
 const evalBarWrapEl = document.querySelector('#eval-bar-wrap');
 const evalBarWhiteFillEl = document.querySelector('#eval-bar-white-fill');
 const evalBarLabelEl = document.querySelector('#eval-bar-label');
@@ -101,7 +125,7 @@ const gameResultMainMenuBtnEl = document.querySelector('#game-result-main-menu-b
 const gameResultRematchBtnEl = document.querySelector('#game-result-rematch-btn');
 
 const game = createGame();
-const engine = createEngine();
+let engine = null;
 
 let activeMode = GAME_MODE.BLUNDERFISH;
 let displayOrientation = 'w';
@@ -117,12 +141,16 @@ let revealEngineHints = true;
 let showEvalBar = false;
 let neverBlindLastMovedPiece = true;
 let preferredHumanColor = 'random';
-let rampFinalMove = RAMP_DEFAULT_FINAL_MOVE;
-let computerEngineTurnCount = 0;
-let lastRampTargetCp = computeTargetEvalCp({
+let clapbackFinalMove = CLAPBACK_DEFAULT_FINAL_MOVE;
+let clapbackEngineTurnCount = 0;
+let lastClapbackTargetCp = computeClapbackTargetEvalCp({
   engineTurnIndex: 1,
-  finalMove: rampFinalMove
+  finalMove: clapbackFinalMove
 });
+let rampfishStartElo = RAMPFISH_DEFAULT_START_ELO;
+let rampfishEndElo = RAMPFISH_DEFAULT_END_ELO;
+let rampfishTurnN = RAMPFISH_DEFAULT_TURN_N;
+let rampfishEngineTurnCount = 0;
 let lastBoardTouchEndTs = 0;
 let gameStarted = false;
 let currentBlindSquares = new Set();
@@ -134,6 +162,7 @@ let gameConcluded = false;
 let forcedGameStatus = null;
 let evalHistoryHuman = [];
 let gameGeneration = 0;
+let pendingGameResultModalTimeoutId = null;
 const blunderDecisionSmoother = createBlunderDecisionSmoother();
 
 const PIECE_ORDER = ['p', 'b', 'n', 'r', 'q'];
@@ -289,7 +318,7 @@ function renderGameResultGraph(history) {
     })
     .join('');
 
-  const shouldShowTargetLine = activeMode === GAME_MODE.RAMPFISH;
+  const shouldShowTargetLine = activeMode === GAME_MODE.CLAPBACKFISH;
   let targetLineMarkup = '';
   let targetLegendMarkup = '';
   if (shouldShowTargetLine) {
@@ -298,32 +327,34 @@ function renderGameResultGraph(history) {
     const clampToRange = (cp) => Math.max(yRange.minCp, Math.min(yRange.maxCp, cp));
     const targetSamples = [];
 
-    const startTargetHumanCp = -computeTargetEvalCp({
+    const startTargetHumanCp = -computeClapbackTargetEvalCp({
       engineTurnIndex: 1,
-      finalMove: rampFinalMove
+      finalMove: clapbackFinalMove
     });
     targetSamples.push({ ply: 0, cp: clampToRange(startTargetHumanCp) });
 
-    for (let turn = 1; turn <= rampFinalMove; turn += 1) {
+    for (let turn = 1; turn <= clapbackFinalMove; turn += 1) {
       const ply = engineMovePlyForTurn(turn);
       if (ply > maxPly) {
         break;
       }
       targetSamples.push({
         ply,
-        cp: clampToRange(-computeTargetEvalCp({ engineTurnIndex: turn, finalMove: rampFinalMove }))
+        cp: clampToRange(
+          -computeClapbackTargetEvalCp({ engineTurnIndex: turn, finalMove: clapbackFinalMove })
+        )
       });
     }
 
     const lastTarget = targetSamples[targetSamples.length - 1];
     if (lastTarget.ply < maxPly) {
-      const postRampHumanCp = clampToRange(
-        -computeTargetEvalCp({
-          engineTurnIndex: rampFinalMove + 1,
-          finalMove: rampFinalMove
+      const postClapbackHumanCp = clampToRange(
+        -computeClapbackTargetEvalCp({
+          engineTurnIndex: clapbackFinalMove + 1,
+          finalMove: clapbackFinalMove
         })
       );
-      targetSamples.push({ ply: maxPly, cp: postRampHumanCp });
+      targetSamples.push({ ply: maxPly, cp: postClapbackHumanCp });
     }
 
     const targetPoints = targetSamples
@@ -390,7 +421,33 @@ function openGameResultModal(status) {
   postGameModalOpen = true;
 }
 
+function clearPendingGameResultModal() {
+  if (pendingGameResultModalTimeoutId !== null) {
+    clearTimeout(pendingGameResultModalTimeoutId);
+    pendingGameResultModalTimeoutId = null;
+  }
+}
+
+function scheduleGameResultModal() {
+  clearPendingGameResultModal();
+  const scheduledGeneration = gameGeneration;
+  pendingGameResultModalTimeoutId = setTimeout(() => {
+    pendingGameResultModalTimeoutId = null;
+    if (scheduledGeneration !== gameGeneration) {
+      return;
+    }
+
+    const status = getEffectiveGameStatus();
+    if (!status.over || !gameConcluded) {
+      return;
+    }
+
+    openGameResultModal(status);
+  }, GAME_RESULT_MODAL_DELAY_MS);
+}
+
 function closeGameResultModal() {
+  clearPendingGameResultModal();
   if (!gameResultDialogEl) {
     return;
   }
@@ -406,7 +463,7 @@ function closeGameResultModal() {
 
 function bumpGeneration(reason = 'generation_changed') {
   gameGeneration += 1;
-  if (typeof engine.flushAnalysis === 'function') {
+  if (engine && typeof engine.flushAnalysis === 'function') {
     engine.flushAnalysis(reason);
   }
   evalSampleToken += 1;
@@ -473,7 +530,7 @@ function getSettingMax() {
   if (activeMode === GAME_MODE.BLINDFISH) {
     return BLINDNESS_MAX;
   }
-  if (activeMode === GAME_MODE.RAMPFISH) {
+  if (activeMode === GAME_MODE.CLAPBACKFISH || activeMode === GAME_MODE.RAMPFISH) {
     return 0;
   }
   return BLUNDER_MAX;
@@ -483,7 +540,7 @@ function getCurrentSettingValue() {
   if (activeMode === GAME_MODE.BLINDFISH) {
     return pieceBlindnessPercent;
   }
-  if (activeMode === GAME_MODE.RAMPFISH) {
+  if (activeMode === GAME_MODE.CLAPBACKFISH || activeMode === GAME_MODE.RAMPFISH) {
     return 0;
   }
   return blunderChancePercent;
@@ -498,7 +555,7 @@ function clampSettingValue(value) {
 }
 
 function setSettingControls(nextValue) {
-  if (activeMode === GAME_MODE.RAMPFISH) {
+  if (activeMode === GAME_MODE.CLAPBACKFISH || activeMode === GAME_MODE.RAMPFISH) {
     return;
   }
 
@@ -529,47 +586,84 @@ function formatTargetEvalWinnerCentric(cp) {
   return `${colorLabel(winningColor)} +${magnitude}`;
 }
 
-function updateRampReadonlyDisplay() {
-  rampTargetCpValueEl.textContent = formatTargetEvalWinnerCentric(lastRampTargetCp);
+function updateClapbackReadonlyDisplay() {
+  clapbackTargetCpValueEl.textContent = formatTargetEvalWinnerCentric(lastClapbackTargetCp);
+}
+
+function getCurrentMaiaElo() {
+  const progress = computeRampProgress(rampfishEngineTurnCount, rampfishTurnN);
+  const targetElo = interpolateElo(rampfishStartElo, rampfishEndElo, progress);
+  return nearestSupportedMaiaElo(targetElo);
+}
+
+function updateCurrentMaiaEloDisplay() {
+  if (!currentMaiaEloRowEl || !currentMaiaEloValueEl) {
+    return;
+  }
+
+  const useMaia = activeMode === GAME_MODE.RAMPFISH;
+  currentMaiaEloRowEl.hidden = !useMaia;
+  if (!useMaia) {
+    return;
+  }
+
+  currentMaiaEloValueEl.textContent = String(getCurrentMaiaElo());
 }
 
 function applyModeSettingsUi() {
   const isBlindfish = activeMode === GAME_MODE.BLINDFISH;
+  const isClapbackfish = activeMode === GAME_MODE.CLAPBACKFISH;
   const isRampfish = activeMode === GAME_MODE.RAMPFISH;
 
-  settingLabelEl.textContent = isRampfish
+  settingLabelEl.textContent = isClapbackfish
     ? 'Clapbackfish controls'
+    : isRampfish
+    ? 'Rampfish controls'
     : isBlindfish
     ? 'Percentage of invisible pieces per turn'
     : 'Blunder Chance';
   revealSettingLabelEl.textContent = isBlindfish ? 'Reveal Blindness' : 'Reveal Blunders';
-  settingPercentSymbolEl.hidden = isRampfish;
-  settingLabelEl.hidden = isRampfish;
-  settingRowEl.hidden = isRampfish;
-  revealSettingCheckboxEl.hidden = isRampfish;
+  settingPercentSymbolEl.hidden = isClapbackfish || isRampfish;
+  settingLabelEl.hidden = isClapbackfish || isRampfish;
+  settingRowEl.hidden = isClapbackfish || isRampfish;
+  revealSettingCheckboxEl.hidden = isClapbackfish || isRampfish;
   blindToYourPiecesCheckbox.parentElement.hidden = !isBlindfish;
   blindToOwnPiecesCheckbox.parentElement.hidden = !isBlindfish;
   neverBlindLastMovedCheckbox.parentElement.hidden = !isBlindfish;
-  rampReadonlySettingsEl.hidden = !isRampfish;
-  topbarTitleEl.textContent = isRampfish ? 'Clapbackfish' : isBlindfish ? 'Blindfish' : 'Blunderfish';
-  subtitleEl.textContent = isRampfish
-    ? 'Makes the comeback of the century.'
+  clapbackReadonlySettingsEl.hidden = !isClapbackfish;
+  topbarTitleEl.textContent = isClapbackfish
+    ? 'Clapbackfish'
+    : isRampfish
+    ? 'Rampfish'
     : isBlindfish
-    ? 'Blindfish is max difficulty stockfish, but it evaluates positions while blind to selected pieces.'
-    : 'Max difficulty stockfish but it is forced to randomly play blunders';
+    ? 'Blindfish'
+    : 'Blunderfish';
+  subtitleEl.textContent = isClapbackfish
+    ? 'Makes the comeback of the century.'
+    : isRampfish
+    ? 'Ramps Maia difficulty up or down over the game.'
+    : isBlindfish
+    ? 'Blindfish uses Stockfish, but it evaluates positions while blind to selected pieces.'
+    : 'Stockfish is forced to randomly play blunders.';
 
-  if (!isRampfish) {
+  if (!isClapbackfish && !isRampfish) {
     blunderSlider.max = String(getSettingMax());
     blunderInput.max = String(getSettingMax());
     setSettingControls(isBlindfish ? pieceBlindnessPercent : blunderChancePercent);
   }
 
-  updateRampReadonlyDisplay();
+  updateCurrentMaiaEloDisplay();
+  updateClapbackReadonlyDisplay();
 }
 
 function updateSetupPreviewValues() {
   setupBlunderValueEl.textContent = `${setupBlunderSliderEl.value}%`;
   setupBlindValueEl.textContent = `${setupBlindSliderEl.value}%`;
+}
+
+function updateSetupEngineSelectionUi() {
+  const isRampfish = activeMode === GAME_MODE.RAMPFISH;
+  setupRampfishSettingsEl.hidden = !isRampfish;
 }
 
 function showModeSelectionScreen() {
@@ -580,31 +674,41 @@ function showModeSelectionScreen() {
 function showSetupScreen(mode) {
   activeMode = mode;
   const isBlindfish = mode === GAME_MODE.BLINDFISH;
+  const isClapbackfish = mode === GAME_MODE.CLAPBACKFISH;
   const isRampfish = mode === GAME_MODE.RAMPFISH;
 
-  setupTitleEl.textContent = isRampfish
+  setupTitleEl.textContent = isClapbackfish
     ? 'Clapbackfish Settings'
+    : isRampfish
+      ? 'Rampfish Settings'
     : isBlindfish
       ? 'Blindfish Settings'
       : 'Blunderfish Settings';
-  setupSubtitleEl.textContent = isRampfish
+  setupSubtitleEl.textContent = isClapbackfish
     ? 'Clapbackfish throws in the beginning then clap backs at the end.'
+    : isRampfish
+    ? 'Rampfish ramps Maia difficulty up or down over the game.'
     : isBlindfish
     ? 'Choose how Blindfish should forget pieces before the game starts.'
     : 'Choose how often Blunderfish should blunder before the game starts.';
 
-  setupBlunderSettingsEl.hidden = isBlindfish || isRampfish;
+  setupBlunderSettingsEl.hidden = isBlindfish || isClapbackfish || isRampfish;
   setupBlindSettingsEl.hidden = !isBlindfish;
+  setupRampfishSettingsEl.hidden = !isRampfish;
   setupFirstGameHintEl.hidden = !isBlindfish;
 
   setupBlunderSliderEl.value = String(blunderChancePercent);
   setupBlindSliderEl.value = String(pieceBlindnessPercent);
+  setupRampfishStartEloEl.value = String(rampfishStartElo);
+  setupRampfishEndEloEl.value = String(rampfishEndElo);
+  setupRampfishTurnNEl.value = String(rampfishTurnN);
   setupRevealBlundersEl.checked = revealEngineHints;
   setupBlindToYourPiecesEl.checked = blindToYourPiecesCheckbox.checked;
   setupBlindToOwnPiecesEl.checked = blindToOwnPiecesCheckbox.checked;
   setupNeverBlindLastMovedEl.checked = neverBlindLastMovedPiece;
   setupRevealBlindnessEl.checked = revealEngineHints;
   setupColorSelectEl.value = preferredHumanColor;
+  updateSetupEngineSelectionUi();
   updateSetupPreviewValues();
 
   modeSelectScreenEl.hidden = true;
@@ -613,6 +717,22 @@ function showSetupScreen(mode) {
 
 function applySetupSelections() {
   preferredHumanColor = setupColorSelectEl.value;
+  const parsedRampfishStart = Number(setupRampfishStartEloEl.value);
+  const parsedRampfishEnd = Number(setupRampfishEndEloEl.value);
+  const parsedRampfishTurnN = Number(setupRampfishTurnNEl.value);
+
+  if (activeMode === GAME_MODE.RAMPFISH) {
+    rampfishStartElo = nearestSupportedMaiaElo(parsedRampfishStart);
+    rampfishEndElo = nearestSupportedMaiaElo(parsedRampfishEnd);
+    rampfishTurnN = clampTurnN(parsedRampfishTurnN);
+    revealEngineHints = false;
+    revealBlundersCheckbox.checked = false;
+    blindToYourPiecesCheckbox.checked = true;
+    blindToOwnPiecesCheckbox.checked = true;
+    neverBlindLastMovedPiece = true;
+    neverBlindLastMovedCheckbox.checked = true;
+    return;
+  }
 
   if (activeMode === GAME_MODE.BLINDFISH) {
     pieceBlindnessPercent = clampSettingValue(Number(setupBlindSliderEl.value));
@@ -625,17 +745,17 @@ function applySetupSelections() {
     return;
   }
 
-  if (activeMode === GAME_MODE.RAMPFISH) {
-    rampFinalMove = RAMP_DEFAULT_FINAL_MOVE;
+  if (activeMode === GAME_MODE.CLAPBACKFISH) {
+    clapbackFinalMove = CLAPBACK_DEFAULT_FINAL_MOVE;
     revealEngineHints = false;
     revealBlundersCheckbox.checked = false;
     blindToYourPiecesCheckbox.checked = true;
     blindToOwnPiecesCheckbox.checked = true;
     neverBlindLastMovedPiece = true;
     neverBlindLastMovedCheckbox.checked = true;
-    lastRampTargetCp = computeTargetEvalCp({
+    lastClapbackTargetCp = computeClapbackTargetEvalCp({
       engineTurnIndex: 1,
-      finalMove: rampFinalMove
+      finalMove: clapbackFinalMove
     });
     return;
   }
@@ -700,8 +820,10 @@ function updateStatus() {
     statusTextEl.textContent =
       activeMode === GAME_MODE.BLINDFISH
         ? 'Blindfish is thinking...'
-        : activeMode === GAME_MODE.RAMPFISH
+        : activeMode === GAME_MODE.CLAPBACKFISH
           ? 'Clapbackfish is thinking...'
+          : activeMode === GAME_MODE.RAMPFISH
+            ? 'Rampfish is thinking...'
           : 'Blunderfish is thinking...';
     return;
   }
@@ -845,6 +967,68 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function nowMs() {
+  if (typeof performance !== 'undefined' && typeof performance.now === 'function') {
+    return performance.now();
+  }
+  return Date.now();
+}
+
+function isMaiaProviderActive() {
+  return activeMode === GAME_MODE.RAMPFISH;
+}
+
+function shouldApplyHumanMaiaDelay() {
+  if (!isMaiaProviderActive()) {
+    return false;
+  }
+
+  if (import.meta.env.MODE === 'test') {
+    return false;
+  }
+
+  if (typeof navigator !== 'undefined' && navigator.webdriver) {
+    return false;
+  }
+
+  return true;
+}
+
+async function maybeApplyHumanMaiaDelay(inferenceDurationMs) {
+  if (!shouldApplyHumanMaiaDelay()) {
+    return;
+  }
+
+  if (!Number.isFinite(inferenceDurationMs) || inferenceDurationMs >= MAIA_HUMAN_DELAY_THRESHOLD_MS) {
+    return;
+  }
+
+  const extraDelayMs =
+    MAIA_HUMAN_DELAY_MIN_MS + Math.random() * (MAIA_HUMAN_DELAY_MAX_MS - MAIA_HUMAN_DELAY_MIN_MS);
+  await sleep(extraDelayMs);
+}
+
+async function getBestMoveWithMaiaDelay(fen, search) {
+  const startedAtMs = nowMs();
+  const move = await engine.getBestMove(fen, search);
+  await maybeApplyHumanMaiaDelay(nowMs() - startedAtMs);
+  return move;
+}
+
+async function getRankedMovesWithMaiaDelay(fen, options) {
+  const startedAtMs = nowMs();
+  const rankedMoves = await engine.getRankedMoves(fen, options);
+  await maybeApplyHumanMaiaDelay(nowMs() - startedAtMs);
+  return rankedMoves;
+}
+
+async function getRankedMovesWithScoresWithMaiaDelay(fen, options) {
+  const startedAtMs = nowMs();
+  const entries = await engine.getRankedMovesWithScores(fen, options);
+  await maybeApplyHumanMaiaDelay(nowMs() - startedAtMs);
+  return entries;
+}
+
 async function copyTextToClipboard(text) {
   if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
     await navigator.clipboard.writeText(text);
@@ -919,7 +1103,7 @@ function handleGameConclusionTransition() {
 
   gameConcluded = true;
   updatePrimaryTopRightButton();
-  openGameResultModal(status);
+  scheduleGameResultModal();
 }
 
 function forfeitCurrentGame() {
@@ -946,6 +1130,7 @@ function forfeitCurrentGame() {
 
 function returnToMainMenu() {
   bumpGeneration('main_menu');
+  clearPendingGameResultModal();
   closeGameResultModal();
   forcedGameStatus = null;
   gameConcluded = false;
@@ -959,7 +1144,8 @@ function returnToMainMenu() {
 function refresh() {
   updatePrimaryTopRightButton();
   handleGameConclusionTransition();
-  updateRampReadonlyDisplay();
+  updateCurrentMaiaEloDisplay();
+  updateClapbackReadonlyDisplay();
   renderEvalBar();
 
   board.setMoveQueryHandlers({
@@ -1037,7 +1223,7 @@ async function chooseBlindfishMove(tokenAtStart) {
   if (!includeHumanPieces && !includeComputerPieces) {
     currentBlindSquares = new Set();
     refresh();
-    return engine.getBestMove(game.getFen(), ENGINE_MOVETIME_MS);
+    return getBestMoveWithMaiaDelay(game.getFen(), ENGINE_MOVETIME_MS);
   }
 
   const position = game.getPosition();
@@ -1069,7 +1255,7 @@ async function chooseBlindfishMove(tokenAtStart) {
   if (blindnessCount <= 0) {
     currentBlindSquares = new Set();
     refresh();
-    return engine.getBestMove(game.getFen(), ENGINE_MOVETIME_MS);
+    return getBestMoveWithMaiaDelay(game.getFen(), ENGINE_MOVETIME_MS);
   }
 
   const legalMoves = game.getAllLegalMoves();
@@ -1090,7 +1276,7 @@ async function chooseBlindfishMove(tokenAtStart) {
       }),
     buildBlindFen: (blindSquares) => game.buildBlindFen(blindSquares),
     isBlindFenSearchSafe: (fen) => game.isBlindFenSearchSafe(fen),
-    getRankedMoves: (fen, options) => engine.getRankedMoves(fen, options),
+    getRankedMoves: (fen, options) => getRankedMovesWithMaiaDelay(fen, options),
     isLegalMove: (move) => game.isLegalMove(move),
     getAllLegalMoves: () => game.getAllLegalMoves(),
     onBlindSelection: (blindSquares) => {
@@ -1131,17 +1317,17 @@ async function requestEngineMove() {
       }
       computerMoveKinds.set(historyPlyIndex, 'blind');
       randomMoveHurts.delete(historyPlyIndex);
-    } else if (activeMode === GAME_MODE.RAMPFISH) {
-      computerEngineTurnCount += 1;
-      lastRampTargetCp = computeTargetEvalCp({
-        engineTurnIndex: computerEngineTurnCount,
-        finalMove: rampFinalMove
+    } else if (activeMode === GAME_MODE.CLAPBACKFISH) {
+      clapbackEngineTurnCount += 1;
+      lastClapbackTargetCp = computeClapbackTargetEvalCp({
+        engineTurnIndex: clapbackEngineTurnCount,
+        finalMove: clapbackFinalMove
       });
       refresh();
 
-      await engine.setSkillLevel(RAMP_MAX_SKILL_LEVEL);
-      if (isPostRampPhase(computerEngineTurnCount, rampFinalMove)) {
-        selectedMove = await engine.getBestMove(game.getFen(), ENGINE_MOVETIME_MS);
+      await engine.setSkillLevel(CLAPBACK_MAX_SKILL_LEVEL);
+      if (isPostClapbackPhase(clapbackEngineTurnCount, clapbackFinalMove)) {
+        selectedMove = await getBestMoveWithMaiaDelay(game.getFen(), ENGINE_MOVETIME_MS);
       } else {
         const legalMoves = game.getAllLegalMoves();
         if (legalMoves.length === 0) {
@@ -1149,7 +1335,7 @@ async function requestEngineMove() {
           return;
         }
 
-        const rankedEntries = await engine.getRankedMovesWithScores(game.getFen(), {
+        const rankedEntries = await getRankedMovesWithScoresWithMaiaDelay(game.getFen(), {
           movetimeMs: ENGINE_MOVETIME_MS,
           multiPv: legalMoves.length
         });
@@ -1189,7 +1375,7 @@ async function requestEngineMove() {
           }
           const scoreForComputer = scoreToColorPerspective(entry.score, game.getTurn(), computerColor);
           const scoreCpComparable = scoreToComparableCp(scoreForComputer);
-          const distance = Math.abs(scoreCpComparable - lastRampTargetCp);
+          const distance = Math.abs(scoreCpComparable - lastClapbackTargetCp);
 
           if (
             !bestEntry ||
@@ -1202,7 +1388,16 @@ async function requestEngineMove() {
 
         selectedMove = bestEntry ? bestEntry.move : orderedEntries[0]?.move || legalMoves[0];
       }
-      computerMoveKinds.set(historyPlyIndex, 'ramp');
+      computerMoveKinds.set(historyPlyIndex, 'clapback');
+      randomMoveHurts.delete(historyPlyIndex);
+    } else if (activeMode === GAME_MODE.RAMPFISH) {
+      rampfishEngineTurnCount += 1;
+      const progress = computeRampProgress(rampfishEngineTurnCount, rampfishTurnN);
+      const targetElo = interpolateElo(rampfishStartElo, rampfishEndElo, progress);
+      const currentElo = nearestSupportedMaiaElo(targetElo);
+      await engine.setMaiaDifficulty(currentElo);
+      selectedMove = await getBestMoveWithMaiaDelay(game.getFen(), ENGINE_MOVETIME_MS);
+      computerMoveKinds.set(historyPlyIndex, 'rampfish');
       randomMoveHurts.delete(historyPlyIndex);
     } else {
       const useRandomMove = blunderDecisionSmoother.next(blunderChancePercent);
@@ -1220,7 +1415,7 @@ async function requestEngineMove() {
         selectedMove = legalMoves[choiceIndex];
         await sleep(RANDOM_MOVE_DELAY_MS);
       } else {
-        selectedMove = await engine.getBestMove(game.getFen(), ENGINE_MOVETIME_MS);
+        selectedMove = await getBestMoveWithMaiaDelay(game.getFen(), ENGINE_MOVETIME_MS);
       }
 
       computerMoveKinds.set(historyPlyIndex, useRandomMove ? 'random' : 'engine');
@@ -1291,7 +1486,12 @@ async function handleHumanMoveAttempt({ from, to }) {
 }
 
 async function startNewGame() {
+  if (!engine) {
+    throw new Error('Engine not initialized');
+  }
+
   bumpGeneration('start_new_game');
+  clearPendingGameResultModal();
   searchToken += 1;
   thinking = false;
   pendingPromotion = null;
@@ -1306,11 +1506,12 @@ async function startNewGame() {
   gameConcluded = false;
   forcedGameStatus = null;
   evalHistoryHuman = [];
-  computerEngineTurnCount = 0;
-  lastRampTargetCp = computeTargetEvalCp({
+  clapbackEngineTurnCount = 0;
+  lastClapbackTargetCp = computeClapbackTargetEvalCp({
     engineTurnIndex: 1,
-    finalMove: rampFinalMove
+    finalMove: clapbackFinalMove
   });
+  rampfishEngineTurnCount = 0;
 
   const humanColor =
     preferredHumanColor === 'random' ? randomColor() : preferredHumanColor;
@@ -1409,11 +1610,15 @@ neverBlindLastMovedCheckbox.addEventListener('change', (event) => {
 });
 
 async function boot() {
+  const engineProvider =
+    activeMode === GAME_MODE.RAMPFISH ? ENGINE_PROVIDER.MAIA : ENGINE_PROVIDER.STOCKFISH;
   statusTextEl.textContent =
     activeMode === GAME_MODE.BLINDFISH
       ? 'Initializing Blindfish...'
-      : activeMode === GAME_MODE.RAMPFISH
+      : activeMode === GAME_MODE.CLAPBACKFISH
         ? 'Initializing Clapbackfish...'
+      : activeMode === GAME_MODE.RAMPFISH
+        ? 'Initializing Rampfish (Maia)...'
         : 'Initializing Blunderfish...';
 
   applyModeSettingsUi();
@@ -1421,7 +1626,20 @@ async function boot() {
   showEvalBar = Boolean(showEvalBarCheckbox.checked);
   renderEvalBar();
 
+  if (engine) {
+    engine.terminate();
+    engine = null;
+  }
+
+  engine = createEngine({
+    provider: engineProvider,
+    maiaDifficulty: rampfishStartElo
+  });
+
   await engine.init();
+  if (engineProvider === ENGINE_PROVIDER.MAIA) {
+    await engine.setMaiaDifficulty(getCurrentMaiaElo());
+  }
   await engine.setSkillLevel(20);
   await startNewGame();
 }
@@ -1429,6 +1647,7 @@ async function boot() {
 function setModeSelectionDisabled(disabled) {
   modeBlunderfishBtn.disabled = disabled;
   modeBlindfishBtn.disabled = disabled;
+  modeClapbackfishBtn.disabled = disabled;
   modeRampfishBtn.disabled = disabled;
   setupStartBtn.disabled = disabled;
   setupBackBtn.disabled = disabled;
@@ -1454,6 +1673,10 @@ async function launchMode(mode) {
   try {
     await boot();
   } catch (error) {
+    if (engine) {
+      engine.terminate();
+      engine = null;
+    }
     gameStarted = false;
     showModeSelectionScreen();
     gameAppEl.classList.add('app-hidden');
@@ -1479,6 +1702,10 @@ modeBlindfishBtn.addEventListener('click', () => {
 
 modeBlunderfishBtn.addEventListener('click', () => {
   showSetupScreen(GAME_MODE.BLUNDERFISH);
+});
+
+modeClapbackfishBtn.addEventListener('click', () => {
+  showSetupScreen(GAME_MODE.CLAPBACKFISH);
 });
 
 modeRampfishBtn.addEventListener('click', () => {

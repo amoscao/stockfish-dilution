@@ -4,18 +4,21 @@ import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
+const boardController = vi.hoisted(() => ({
+  onHumanMoveAttempt: null
+}));
+
+const createEngineMock = vi.hoisted(() => vi.fn());
+
 const engineMock = vi.hoisted(() => ({
   init: vi.fn().mockResolvedValue(undefined),
   setSkillLevel: vi.fn().mockResolvedValue(undefined),
+  setMaiaDifficulty: vi.fn().mockResolvedValue(undefined),
   newGame: vi.fn().mockResolvedValue(undefined),
   getBestMove: vi.fn().mockResolvedValue({ from: 'a7', to: 'a6' }),
   analyzePosition: vi.fn().mockResolvedValue({ type: 'cp', value: 0 }),
-  getRankedMovesWithScores: vi
-    .fn()
-    .mockResolvedValue([
-      { rank: 1, move: { from: 'a7', to: 'a6' }, score: { type: 'cp', value: -1500 } },
-      { rank: 2, move: { from: 'a7', to: 'a5' }, score: { type: 'cp', value: 200 } }
-    ]),
+  getRankedMovesWithScores: vi.fn().mockResolvedValue([]),
+  getRankedMoves: vi.fn().mockResolvedValue([]),
   flushAnalysis: vi.fn(),
   terminate: vi.fn()
 }));
@@ -27,12 +30,6 @@ const boardMock = vi.hoisted(() => ({
   setKingOutcome: vi.fn(),
   setBlindMarkers: vi.fn(),
   render: vi.fn()
-}));
-
-const gameApplyMoveMock = vi.hoisted(() => vi.fn());
-
-const gameConfig = vi.hoisted(() => ({
-  legalMoves: [{ from: 'a7', to: 'a6' }]
 }));
 
 function createGameDouble() {
@@ -65,8 +62,8 @@ function createGameDouble() {
       };
     },
     getLegalMoves: vi.fn().mockReturnValue([]),
-    getAllLegalMoves: vi.fn(() => gameConfig.legalMoves),
-    applyMove: gameApplyMoveMock.mockImplementation(() => {
+    getAllLegalMoves: vi.fn(() => [{ from: 'a7', to: 'a6' }]),
+    applyMove: vi.fn(() => {
       history.push('a6');
       turn = turn === 'w' ? 'b' : 'w';
       return { ok: true };
@@ -92,11 +89,14 @@ vi.mock('../src/blunder-smoother.js', () => ({
 }));
 
 vi.mock('../src/engine.js', () => ({
-  createEngine: vi.fn(() => engineMock)
+  createEngine: createEngineMock
 }));
 
 vi.mock('../src/board.js', () => ({
-  createBoard: vi.fn(() => boardMock)
+  createBoard: vi.fn(({ onHumanMoveAttempt }) => {
+    boardController.onHumanMoveAttempt = onHumanMoveAttempt;
+    return boardMock;
+  })
 }));
 
 vi.mock('../src/game.js', () => ({
@@ -123,8 +123,9 @@ describe('rampfish integration', () => {
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
-    gameApplyMoveMock.mockReset();
-    gameConfig.legalMoves = [{ from: 'a7', to: 'a6' }];
+    boardController.onHumanMoveAttempt = null;
+    createEngineMock.mockImplementation(() => engineMock);
+
     loadIndexDom();
     Object.defineProperty(window, 'matchMedia', {
       writable: true,
@@ -141,101 +142,58 @@ describe('rampfish integration', () => {
     });
   });
 
-  test('shows ramp setup controls with expected defaults', async () => {
+  test('shows rampfish setup controls with expected defaults', async () => {
     await import('../src/main.js');
 
     document.querySelector('#mode-rampfish-btn').click();
 
-    expect(document.querySelector('#setup-ramp-settings')).toBeNull();
-    expect(document.querySelector('#setup-ramp-direction')).toBeNull();
-    expect(document.querySelector('#setup-ramp-final-move')).toBeNull();
-    expect(document.querySelector('#setup-subtitle').textContent).toBe(
-      'Clapbackfish throws in the beginning then clap backs at the end.'
-    );
+    expect(document.querySelector('#setup-title').textContent).toBe('Rampfish Settings');
+    expect(document.querySelector('#setup-rampfish-settings').hidden).toBe(false);
+    expect(document.querySelector('#setup-rampfish-start-elo').value).toBe('1100');
+    expect(document.querySelector('#setup-rampfish-end-elo').value).toBe('1900');
+    expect(document.querySelector('#setup-rampfish-turn-n').value).toBe('20');
   });
 
-  test('ramp up first engine turn uses max engine settings and target eval readout', async () => {
+  test('removes non-rampfish Maia controls and forces Maia provider in rampfish mode', async () => {
     await import('../src/main.js');
 
     document.querySelector('#mode-rampfish-btn').click();
-    const colorSelect = document.querySelector('#setup-color-select');
-    colorSelect.value = 'w';
-    colorSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    expect(document.querySelector('#setup-opponent-engine-settings')).toBeNull();
+    expect(document.querySelector('#setup-maia-settings')).toBeNull();
+
     document.querySelector('#setup-start-btn').click();
     await flushUi();
     await flushUi();
 
-    expect(engineMock.setSkillLevel).toHaveBeenCalledWith(20);
-    expect(engineMock.getRankedMovesWithScores).toHaveBeenCalledWith(
-      '4k3/8/8/8/8/8/8/4K3 b - - 0 1',
-      { movetimeMs: 1500, multiPv: 1 }
-    );
-
-    expect(document.querySelector('#ramp-readonly-settings').hidden).toBe(false);
-    expect(document.querySelector('#ramp-target-cp-value').textContent).toBe('White +20.00');
-    expect(document.querySelector('#setting-label').hidden).toBe(true);
-    expect(document.querySelector('#blunder-slider').parentElement.hidden).toBe(true);
-    expect(document.querySelector('#reveal-blunders').parentElement.hidden).toBe(true);
-    expect(document.querySelector('#show-eval-bar').parentElement.hidden).toBe(false);
+    expect(createEngineMock).toHaveBeenCalledWith({
+      provider: 'maia',
+      maiaDifficulty: 1100
+    });
   });
 
-  test('selects move by engine-perspective score distance to target eval', async () => {
-    gameConfig.legalMoves = [
-      { from: 'a7', to: 'a6' },
-      { from: 'a7', to: 'a5' }
-    ];
-    engineMock.getRankedMovesWithScores.mockResolvedValueOnce([
-      { rank: 1, move: { from: 'a7', to: 'a6' }, score: { type: 'cp', value: -1800 } },
-      { rank: 2, move: { from: 'a7', to: 'a5' }, score: { type: 'cp', value: -1950 } }
-    ]);
-
-    await import('../src/main.js');
-    document.querySelector('#mode-rampfish-btn').click();
-    const colorSelect = document.querySelector('#setup-color-select');
-    colorSelect.value = 'w';
-    colorSelect.dispatchEvent(new Event('change', { bubbles: true }));
-    document.querySelector('#setup-start-btn').click();
-    await flushUi();
-    await flushUi();
-
-    expect(engineMock.getRankedMovesWithScores).toHaveBeenCalledWith(
-      '4k3/8/8/8/8/8/8/4K3 b - - 0 1',
-      { movetimeMs: 1500, multiPv: 2 }
-    );
-    expect(gameApplyMoveMock).toHaveBeenCalledWith({ from: 'a7', to: 'a5' });
-    expect(engineMock.getBestMove).not.toHaveBeenCalled();
-  });
-
-  test('starting clapbackfish should not reset blunderfish setup slider value', async () => {
+  test('advances Maia Elo over AI turns using configured ramp', async () => {
     await import('../src/main.js');
 
-    document.querySelector('#mode-blunderfish-btn').click();
-    const blunderSlider = document.querySelector('#setup-blunder-slider');
-    blunderSlider.value = '37';
-    blunderSlider.dispatchEvent(new Event('input', { bubbles: true }));
-    document.querySelector('#setup-start-btn').click();
-    await flushUi();
-    await flushUi();
-
-    document.querySelector('#new-game-btn').click();
-    await flushUi();
-    await flushUi();
-    document.querySelector('#game-result-main-menu-btn').click();
-    await flushUi();
-
     document.querySelector('#mode-rampfish-btn').click();
+    document.querySelector('#setup-rampfish-start-elo').value = '1100';
+    document.querySelector('#setup-rampfish-end-elo').value = '1900';
+    document.querySelector('#setup-rampfish-turn-n').value = '3';
+    document.querySelector('#setup-color-select').value = 'w';
+
     document.querySelector('#setup-start-btn').click();
     await flushUi();
     await flushUi();
 
-    document.querySelector('#new-game-btn').click();
-    await flushUi();
-    await flushUi();
+    expect(engineMock.setMaiaDifficulty).toHaveBeenCalledWith(1100);
 
-    document.querySelector('#game-result-main-menu-btn').click();
+    await boardController.onHumanMoveAttempt({ from: 'a2', to: 'a3' });
     await flushUi();
+    await flushUi();
+    expect(engineMock.setMaiaDifficulty).toHaveBeenLastCalledWith(1500);
 
-    document.querySelector('#mode-blunderfish-btn').click();
-    expect(document.querySelector('#setup-blunder-slider').value).toBe('37');
+    await boardController.onHumanMoveAttempt({ from: 'b2', to: 'b3' });
+    await flushUi();
+    await flushUi();
+    expect(engineMock.setMaiaDifficulty).toHaveBeenLastCalledWith(1900);
   });
 });

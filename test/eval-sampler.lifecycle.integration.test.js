@@ -9,6 +9,7 @@ const pendingAnalyze = vi.hoisted(() => []);
 const engineMock = vi.hoisted(() => ({
   init: vi.fn().mockResolvedValue(undefined),
   setSkillLevel: vi.fn().mockResolvedValue(undefined),
+  setMaiaDifficulty: vi.fn().mockResolvedValue(undefined),
   newGame: vi.fn().mockResolvedValue(undefined),
   getBestMove: vi.fn().mockResolvedValue({ from: 'a7', to: 'a6' }),
   analyzePosition: vi.fn().mockImplementation(

@@ -7,6 +7,7 @@ import { resolve } from 'node:path';
 const engineMock = vi.hoisted(() => ({
   init: vi.fn().mockResolvedValue(undefined),
   setSkillLevel: vi.fn().mockResolvedValue(undefined),
+  setMaiaDifficulty: vi.fn().mockResolvedValue(undefined),
   newGame: vi.fn().mockResolvedValue(undefined),
   getBestMove: vi.fn().mockResolvedValue({ from: 'a7', to: 'a6' }),
   analyzePosition: vi.fn().mockResolvedValue({ type: 'cp', value: 80 }),
@@ -214,7 +215,7 @@ describe('game result modal integration', () => {
 
     document.querySelector('#game-result-main-menu-btn').click();
     await flushUi();
-    document.querySelector('#mode-rampfish-btn').click();
+    document.querySelector('#mode-clapbackfish-btn').click();
     document.querySelector('#setup-start-btn').click();
     await flushUi();
     await flushUi();

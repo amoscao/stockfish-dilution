@@ -14,20 +14,25 @@
       <div class="mode-card">
         <p class="mode-kicker">Choose a game mode</p>
         <h1 class="mode-title">Pick Your Fish</h1>
-        <p class="mode-subtitle">Max-strength Stockfish, but with chaotic twists.</p>
+        <p class="mode-subtitle">Choose a game mode with a built-in opponent style.</p>
         <div class="mode-options">
           <button id="mode-blunderfish-btn" class="mode-button" type="button">
             <span class="mode-name">Blunderfish</span>
-            <span class="mode-description">Max difficulty stockfish but it is forced to randomly play blunders</span>
+            <span class="mode-description">Stockfish, but it is forced to randomly play blunders</span>
           </button>
           <button id="mode-blindfish-btn" class="mode-button mode-button-secondary" type="button">
             <span class="mode-name">Blindfish</span>
-            <span class="mode-description">Max difficulty stockfish but it randomly forgets about pieces</span>
+            <span class="mode-description">Stockfish, but it randomly forgets about pieces</span>
           </button>
-          <button id="mode-rampfish-btn" class="mode-button mode-button-secondary" type="button">
+          <button id="mode-clapbackfish-btn" class="mode-button mode-button-secondary" type="button">
             <span class="mode-ribbon" aria-hidden="true">New!</span>
             <span class="mode-name">Clapbackfish</span>
             <span class="mode-description">Makes the comeback of the century</span>
+          </button>
+          <button id="mode-rampfish-btn" class="mode-button mode-button-secondary" type="button">
+            <span class="mode-ribbon" aria-hidden="true">New!</span>
+            <span class="mode-name">Rampfish</span>
+            <span class="mode-description">Ramps opponent ELO up or down over the game</span>
           </button>
         </div>
         <p id="mode-select-note" class="mode-note" aria-live="polite"></p>
@@ -39,7 +44,9 @@
         <p class="mode-kicker">Game setup</p>
         <h1 id="setup-title" class="mode-title">Blunderfish Settings</h1>
         <p id="setup-subtitle" class="mode-subtitle">Tune settings before the game starts.</p>
-        <p id="setup-first-game-hint" class="setup-hint" hidden>If this is your first game, use the default settings!</p>
+        <p id="setup-first-game-hint" class="setup-hint" hidden>
+          If this is your first game, use the default settings!
+        </p>
 
         <div id="setup-blunder-settings" class="setup-mode-settings">
           <label class="setting-label" for="setup-blunder-slider">Blunder Chance</label>
@@ -95,6 +102,46 @@
           </label>
         </div>
 
+        <div id="setup-rampfish-settings" class="setup-mode-settings" hidden>
+          <label class="setting-label" for="setup-rampfish-start-elo">Difficulty at start of game</label>
+          <select id="setup-rampfish-start-elo" class="setup-select">
+            <option value="1100" selected>Maia 1100</option>
+            <option value="1200">Maia 1200</option>
+            <option value="1300">Maia 1300</option>
+            <option value="1400">Maia 1400</option>
+            <option value="1500">Maia 1500</option>
+            <option value="1600">Maia 1600</option>
+            <option value="1700">Maia 1700</option>
+            <option value="1800">Maia 1800</option>
+            <option value="1900">Maia 1900</option>
+          </select>
+
+          <label class="setting-label" for="setup-rampfish-end-elo">Difficulty by turn N</label>
+          <select id="setup-rampfish-end-elo" class="setup-select">
+            <option value="1100">Maia 1100</option>
+            <option value="1200">Maia 1200</option>
+            <option value="1300">Maia 1300</option>
+            <option value="1400">Maia 1400</option>
+            <option value="1500">Maia 1500</option>
+            <option value="1600">Maia 1600</option>
+            <option value="1700">Maia 1700</option>
+            <option value="1800">Maia 1800</option>
+            <option value="1900" selected>Maia 1900</option>
+          </select>
+
+          <label class="setting-label" for="setup-rampfish-turn-n">Turn N (AI turns)</label>
+          <input
+            id="setup-rampfish-turn-n"
+            class="setup-number"
+            type="number"
+            min="1"
+            max="200"
+            step="1"
+            value="20"
+            inputmode="numeric"
+          />
+        </div>
+
         <label class="setting-label" for="setup-color-select">Play as</label>
         <select id="setup-color-select" class="setup-select">
           <option value="random" selected>Random</option>
@@ -118,9 +165,7 @@
           <button id="export-fen-btn" type="button">Export FEN</button>
         </div>
       </header>
-      <p class="subtitle">
-        Max difficulty stockfish but it is forced to randomly play blunders
-      </p>
+      <p class="subtitle">Max difficulty stockfish but it is forced to randomly play blunders</p>
 
       <section class="status-wrap">
         <p id="status-text" aria-live="polite"></p>
@@ -153,9 +198,7 @@
 
           <section class="settings-panel" aria-label="Settings">
             <h2>Settings</h2>
-            <label id="setting-label" class="setting-label" for="blunder-slider">
-              Blunder Chance
-            </label>
+            <label id="setting-label" class="setting-label" for="blunder-slider">Blunder Chance</label>
             <div class="setting-row">
               <input
                 id="blunder-slider"
@@ -195,12 +238,17 @@
               <input id="reveal-blunders" type="checkbox" checked />
               <span id="reveal-setting-label">Reveal Blunders</span>
             </label>
+            <p id="current-maia-elo-row" class="maia-elo-row" hidden>
+              <strong>Current Maia ELO:</strong> <span id="current-maia-elo-value">1500</span>
+            </p>
             <label class="setting-checkbox">
               <input id="show-eval-bar" type="checkbox" checked />
               <span>Show eval bar</span>
             </label>
-            <div id="ramp-readonly-settings" class="ramp-readonly" hidden>
-              <p class="ramp-readonly-row"><strong>Current engine goal:</strong> <span id="ramp-target-cp-value">White +20.00</span></p>
+            <div id="clapback-readonly-settings" class="clapback-readonly" hidden>
+              <p class="clapback-readonly-row">
+                <strong>Current engine goal:</strong> <span id="clapback-target-cp-value">White +20.00</span>
+              </p>
             </div>
           </section>
 
@@ -221,9 +269,9 @@
           </section>
         </aside>
       </section>
-      
+
       <footer class="footer">
-        <a href="./CREDITS.md" target="_blank" rel="noreferrer">Asset and engine credits</a>
+        <a href="/CREDITS.md" target="_blank" rel="noreferrer">Asset and engine credits</a>
       </footer>
     </main>
 
