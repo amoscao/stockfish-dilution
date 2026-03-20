@@ -235,7 +235,12 @@ describe('board interactions', () => {
     expect(onHumanMoveAttempt).toHaveBeenCalledTimes(1);
     expect(onHumanMoveAttempt).toHaveBeenCalledWith({ from: 'e2', to: 'e4' });
 
-    container.querySelector('[data-square="g1"]').click();
+    const followupPiece = container.querySelector('[data-square="g1"] .piece');
+    const followupSquare = container.querySelector('[data-square="g1"]');
+    const followupCenter = squareCenter('g1');
+
+    dispatchPointer(followupPiece, 'pointerdown', followupCenter);
+    followupSquare.click();
 
     expect(container.querySelectorAll('.legal-dot')).toHaveLength(2);
     expect(container.querySelector('[data-square="g1"]').classList.contains('selected')).toBe(true);

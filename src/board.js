@@ -156,6 +156,10 @@ export function createBoard({ container, onHumanMoveAttempt }) {
   }
 
   function onPointerDown(event) {
+    // A real follow-up interaction starts with a fresh pointerdown, so any
+    // stale click suppression from the previous drag should not leak into it.
+    suppressNextClick = false;
+
     if (!interactionEnabled) {
       return;
     }
