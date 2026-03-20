@@ -209,4 +209,35 @@ describe('board interactions', () => {
     expect(onHumanMoveAttempt).toHaveBeenCalledTimes(1);
     expect(onHumanMoveAttempt).toHaveBeenCalledWith({ from: 'e2', to: 'e4' });
   });
+
+  test('allows click-to-move immediately after completing a drag', () => {
+    const { container, onHumanMoveAttempt } = makeBoard({
+      position: {
+        e2: { color: 'w', type: 'p' },
+        g1: { color: 'w', type: 'n' }
+      },
+      selectableSquares: new Set(['e2', 'g1']),
+      legalTargetsBySquare: {
+        e2: ['e3', 'e4'],
+        g1: ['f3', 'h3']
+      },
+      interactionEnabled: true
+    });
+
+    const sourcePiece = container.querySelector('[data-square="e2"] .piece');
+    const sourceCenter = squareCenter('e2');
+    const dragTargetCenter = squareCenter('e4');
+
+    dispatchPointer(sourcePiece, 'pointerdown', sourceCenter);
+    dispatchPointer(window, 'pointermove', dragTargetCenter);
+    dispatchPointer(window, 'pointerup', dragTargetCenter);
+
+    expect(onHumanMoveAttempt).toHaveBeenCalledTimes(1);
+    expect(onHumanMoveAttempt).toHaveBeenCalledWith({ from: 'e2', to: 'e4' });
+
+    container.querySelector('[data-square="g1"]').click();
+
+    expect(container.querySelectorAll('.legal-dot')).toHaveLength(2);
+    expect(container.querySelector('[data-square="g1"]').classList.contains('selected')).toBe(true);
+  });
 });
