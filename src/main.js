@@ -192,6 +192,18 @@ function readConfiguredEngineMovetimeMs() {
 const ENGINE_MOVETIME_MS = readConfiguredEngineMovetimeMs();
 const RANDOM_MOVE_DELAY_MS = ENGINE_MOVETIME_MS;
 
+function trackGoatcounterEvent(path, title) {
+  if (typeof window === 'undefined' || typeof window.goatcounter?.count !== 'function') {
+    return;
+  }
+
+  window.goatcounter.count({
+    path,
+    title,
+    event: true
+  });
+}
+
 function randomColor() {
   return Math.random() < 0.5 ? 'w' : 'b';
 }
@@ -1668,6 +1680,7 @@ async function launchMode(mode) {
   modeSelectNoteEl.textContent = '';
   setModeSelectionDisabled(true);
   applySetupSelections();
+  trackGoatcounterEvent(`game-start-${mode}`, `Game started: ${mode}`);
   showGameApp();
 
   try {
